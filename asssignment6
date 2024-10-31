@@ -1,0 +1,57 @@
+#!/usr/bin/python3
+import Jetson.GPIO as GPIO
+import time
+import jetson.inference
+import jetson.utils
+import argparse
+import sys
+
+parser = argparse.ArgumentParser(description="Locate objects in a live camera stream using an object detection DNN.")
+parser.add_argument("input_URI", type=str, default="", nargs='?', help="URI of the input stream")
+parser.add_argument("output_URI", type=str, default="", nargs='?', help="URI of the output stream")
+parser.add_argument("--network", type=str, default="ssd-mobilenet-v2", help="pre-trained model to load")
+parser.add_argument("--overlay", type=str, default="box,labels,conf", help="detection overlay flags")
+parser.add_argument("--threshold", type=float, default=0.5, help="minimum detection threshold to use")
+
+GPIO.setmode(GPIO.BOARD)
+pin13 = 13
+pin11 = 11
+GPIO.setup(pin11, GPIO.OUT)
+GPIO.setup(pin13, GPIO.OUT)
+
+try:
+    opt = parser.parse_known_args()[0]
+except:
+    parser.print_help()
+    sys.exit(0)
+
+output = jetson.utils.videoOutput(opt.output_URI)
+net = jetson.inference.detectNet(opt.network, sys.argv, opt.threshold)
+input = jetson.utils.videoSource(opt.input_URI, sys.argv)
+
+while True:
+    img = input.Capture()
+    detections = net.Detect(img, overlay=opt.overlay)
+    print("detected {} objects in image".format(len(detections)))
+    for detection in detections:
+        print(detection)
+        if detection.ClassID == 2:
+            GPIO.output(pin11, GPIO.HIGH)
+            time.sleep(0.5)
+            GPIO.output(pin11, GPIO.LOW)
+        elif detection.ClassID == 3:
+            GPIO.output(pin13, GPIO.HIGH)
+            time.sleep(0.5)
+            GPIO.output(pin13, GPIO.LOW)
+        else:
+            GPIO.output(pin11, GPIO.LOW)
+            GPIO.output(pin13, GPIO.LOW)
+
+    output.Render(img)
+    output.SetStatus("{:s} | Network {:.0f} FPS".format(opt.network, net.GetNetworkFPS()))
+    net.PrintProfilerTimes()
+
+    if not input.IsStreaming() or not output.IsStreaming():
+        break
+
+GPIO.cleanup()
